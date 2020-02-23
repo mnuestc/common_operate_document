@@ -1,0 +1,41 @@
+#!/bin/bash
+#Output the information of images to images.txt
+# sudo docker image ls >images.txt
+#Get the number of images according to the total of content's rows 
+N=$(awk 'END{print NR}' images.txt)
+echo The total of images is $N
+#Get names and tags of images
+for ((i=2; i<=$N; i++))
+  do
+    image=$(awk 'NR=="'"$i"'" {print $1}' images.txt)
+    version=$(awk 'NR=="'"$i"'" {print $2}' images.txt)
+#Modify the name of files which will be saved in local , otherwise you will be failed to save images.
+    shortname=`echo $image | sed 's/.*\///g'`
+#filename is name of the file that will be saved
+    filename="${shortname}-${version}.tar"
+    imagename="${image}:${version}"
+
+#Output the value of variable
+    echo image=$image
+    echo version=$version
+    echo filename=$filename
+    echo imagename=$imagename
+    echo shortname=$shortname
+
+    docker tag $imagename 10.114.134.253:8088/$imagename
+    docker push 10.114.134.253:8088/$imagename 
+
+
+
+
+    # docker tag $imagename 10.114.134.253:8088/storage/$imagename
+    # docker push 10.114.134.253:8088/storage/$imagename     
+#Save the image as a local tar file
+    # sudo docker save -o $filename $imagename
+#Modify the permission of the file
+    # sudo chmod 755 $filenamek
+#Output the result!
+    echo No.$i $shortname is push successfully！
+  done
+#Delete file
+#rm images.txt
