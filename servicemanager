@@ -1,0 +1,1093 @@
+import os
+# print(os.path.dirname(__file__))
+# print(os.getcwd())
+# path = os.listdir(os.getcwd())
+# for p in path:
+#     if os.path.isdir(p):
+#         print(p)
+# os.popen("python3 server.py")
+import json
+import requests
+import time
+import os
+from os import path
+import yaml
+from string import Template
+from kubernetes import client, config
+from manager.network_operations import K8sNetworkOperation
+from threading import Thread
+
+from flask import Flask, make_response, request, Response
+from flask_restful import reqparse, Api, Resource
+from requests.exceptions import ReadTimeout
+import requests
+from analyzer.applications.faultAnalysis import *
+import re
+# 跨域使用
+from flask_cors import *
+import uuid
+import time
+from analyzer.services.data.paraser import config
+import pdb
+
+#import manager.to_deploy_k8s
+import _thread
+
+app = Flask(__name__)
+CORS(app, supports_credentials=True)
+api = Api(app)
+import os
+import json
+
+folder_path = "/etc/kgraph/"
+file_path = folder_path + "i18n.json"
+
+container_set = {}
+yaml_name = "knowledge-graph.yaml"
+service_yaml_name = "01knowledge-graph-service.yaml"
+rc_yaml_name = "02knowledge-graph-rc.yaml"
+template_dir = "./template/"
+depoloy_dir = "./depoloy/"
+
+knowledge_graph_service_template_path = os.path.join(template_dir, service_yaml_name)
+knowledge_graph_rc_template_path = os.path.join(template_dir, rc_yaml_name)
+knowledge_graph_version = {
+    # 'v1.1': '1.1.0',
+    # 'v1.4': '1.4.2'
+}
+
+
+if not os.path.exists(folder_path):
+    os.makedirs(folder_path)
+if not os.path.exists(file_path):
+    os.mknod(file_path)
+    info = '{"i18n":"EN"}'
+    with open(file_path,'w') as conf:
+        conf.write(info)
+
+def get_language():
+    with open(file_path,'r') as conf:
+        config = json.load(conf)
+        language = config.get("i18n","EN")  
+    return language        
+
+def change_language(str):
+    info = '{"i18n":"EN"}' if str == "EN" else '{"i18n":"CHS"}' 
+    with open(file_path,'w') as conf:
+        conf.write(info)
+
+def async_call(fn):
+    def wrapper(*args, **kwargs):
+        Thread(target=fn, args=args, kwargs=kwargs).start()
+    return wrapper
+
+# class Asyfn:
+#     @async_call
+#     def get_deoploy_result():
+#         time.sleep(5)
+#         print("deploy-sucess")
+#         time.sleep(5)
+#         print("pod-sucess")               
+#         pass
+
+def render(src, dest, **kw):
+    t = Template(open(src, 'r').read())
+    with open(dest, 'w') as f:
+        f.write(t.substitute(**kw))
+
+def getTemplate(templateName):
+    baseDir = os.path.dirname(__file__)
+    configTemplate = os.path.join(baseDir, "template/" + templateName)
+    return configTemplate
+
+from enum import Enum,unique
+@unique
+class Status(Enum):
+    OK = {0:["ok","成功"]} 
+    BODY_IS_INVALID = {400001:["Request body is invalid","请求主体无效"]}
+    TIME_IS_INVALID = {400002:["time is invalid","时间点信息无效"]}
+    SDEVID_IS_INVALID = {400003:["srcDeviceID is invalid","入设备ID参数无效"]}
+    SPORTID_IS_INVALID = {400004:["srcPortID is invalid","入设备端口ID参数无效"]}
+    DDEVID_IS_INVALID = {400005:["destDeviceID is invalid","出设备ID参数无效"]}
+    DPORTID_IS_INVALID = {400006:["destPortID is invalid","出设备端口ID参数无效"]}
+    SIP_IS_INVALID = {400007:["sourceIP is invalid","入接口IP参数无效"]}
+    DIP_IS_INVALID = {400008:["destinationIP is invalid","目的IP参数无效"]}
+    VLAN_IS_INVALID = {400009:["vlan is invalid","VLAN参数无效"]}
+    MPLS_IS_INVALID = {400010:["mplsLabel is invalid","MPLS标签参数无效"]}
+    PACKET_IS_INVALID = {400011:["packetData is invalid","报文信息参数无效"]}
+    SMAC_IS_INVALID = {400012:["smac is invalid","源MAC参数无效"]}
+    DMAC_IS_INVALID = {400013:["dmac is invalid","目的MAC参数无效"]}
+    STARTT_IS_INVALID = {400014:["startTime is invalid","起始时间参数无效"]}
+    DEVID_IS_INVALID = {400015:["deviceId is invalid","设备ID参数无效"]}
+    FTYPE_IS_INVALID = {400016:["faultType is invalid","故障类型参数无效"]}
+    CAUSE_IS_INVALID = {400017:["cause is invalid","故障原因参数无效"]}
+    FAULTID_IS_INVALID = {400018:["faultId is invalid","故障ID参数无效"]}
+    PARAM_IS_MULL = {400019:["param is null","必要参数未传入"]}
+    ENDT_IS_INVALID = {400020:["endTime is invalid","结束时间参数无效"]}
+    CURRPAGE_IS_INVALID = {400021:["currPage is invalid","当前页参数无效"]}
+    PAGESIZE_IS_INVALID = {400022:["pageSize is invalid","每页记录数参数无效"]}  
+    I18N_IS_INVALID = {400023:["i18n is invalid","国际化参数无效 "]}  
+    IP_IS_INVALID = {400024:["IP is invalid","IP参数无效"]}     
+    ACCESS_DENIED = {401001:["Access denied due to invalid subscription key","无效的订阅密钥"]}
+    OUT_OF_QUOTA = {403001:["Out of call volume quota","超出配额"]}
+    FAULT_NOT_FIND = {404001:["Fault is not found","指定的故障信息未发现"]}
+    TIMEOUT = {408001:["Request Timeout","请求超时"]}
+    INVALID_MEDIA_TYPE = {415001:["Invalid Media Type","媒体类型无效"]}
+    RATE_LIMIT = {429001:["Rate limit is exceeded","超出了访问速率限制"]}
+    ACCESS_DATA_FAIL = {430001:["Access data fail","数据访问失败"]}
+
+    
+    def ret(self):
+        '''
+        根据枚举名称取返回码ret
+        :return：返回码ret
+        '''
+        return list(self.value.keys())[0]
+        
+    def msg(self):
+        '''
+        根据枚举名称取状态说明msg
+        :return：状态说明msg
+        '''
+        if get_language() == "EN":
+            return list(self.value.values())[0][0]     
+        else:
+            return list(self.value.values())[0][1]                  
+     
+def is_time_valid(time):
+    # 13位整数的毫秒时间戳
+    pattern = r"^[0-9]{13}$"
+    if isinstance(time, str):   
+        if re.match(pattern,time):
+            return True
+        else:
+            return False
+    return False
+    
+def is_devid_valid(devid):
+    if isinstance(devid, str):  
+        if len(devid) <= 128:
+            return True
+        else:
+            return False
+    return False
+
+def is_portid_valid(portid):
+    if isinstance(portid, str):     
+        if len(portid) <= 128:
+            return True
+        else:
+            return False
+    return False    
+
+def is_ip_valid(ip_address):
+    if ip_address == "0.0.0.0":
+        return False
+    elif isinstance(ip_address, str): 
+        p = re.compile('^((25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(25[0-5]|2[0-4]\d|[01]?\d\d?)$')
+        if p.match(ip_address):
+            return True
+        else:
+            return False
+    return False            
+   
+def is_vlan_valid(vlan):
+    try:
+        vlan = int(vlan)
+        if vlan > 0 and vlan<4095:
+            return True
+        else :
+            return False
+    except ValueError:
+        return False    
+
+def is_mplsLabel_valid(mplsLabel):
+    pattern = r"^[0-9]{1,7}$"
+    if isinstance(mplsLabel, str):
+        labels = mplsLabel.split("/")
+        for label in labels:
+            if (re.match(pattern, label) and int(label) < 1048575 and int(label) >= 0):
+                return True
+            else:
+                return False
+    else:
+        return False
+
+def is_mac_valid(mac):
+    pattern = r"^[A-Fa-f0-9]{12}$"
+    if isinstance(mac, str): 
+        if re.match(pattern,mac):
+            return True
+        else:
+            return False
+    return False
+
+def is_packetData_valid(packetData):
+    pattern = r"^[A-Fa-f0-9]{64,512}$"
+    if isinstance(packetData, str): 
+        if re.match(pattern,packetData):
+            return True
+        else:
+            return False
+    return False        
+
+def is_id_valid(id):
+    # 要求是字符串，数字小写字母下划线减号，长度64以内
+    pattern = r"^[a-z0-9_-]{1,64}$"
+    if isinstance(id, str):   
+        if re.match(pattern,id):
+            return True
+        else :
+            return False
+    return False
+
+def is_Num_valid(num):
+    if num is None:
+        return True
+    try:
+        num = int(num)
+        if num > 0:
+            return True
+        else :
+            return False
+    except ValueError:
+        return False
+
+FaultType = {"faultType":["Forwarding Failed","XXX Failed","YYY Failed"]} 
+portList = {"portList":['Ten-GigabitEthernet1/0/1', 
+                        'Ten-GigabitEthernet1/0/2', 
+                        'Ten-GigabitEthernet1/0/3', 
+                        'Ten-GigabitEthernet1/0/4', 
+                        'Ten-GigabitEthernet1/0/5', 
+                        'Ten-GigabitEthernet1/0/6', 
+                        'Ten-GigabitEthernet1/0/7', 
+                        'Ten-GigabitEthernet1/0/8', 
+                        'Ten-GigabitEthernet1/0/9', 
+                        'Ten-GigabitEthernet1/0/10', 
+                        'Ten-GigabitEthernet1/0/11', 
+                        'Ten-GigabitEthernet1/0/12', 
+                        'Ten-GigabitEthernet1/0/13', 
+                        'Ten-GigabitEthernet1/0/14', 
+                        'Ten-GigabitEthernet1/0/15', 
+                        'Ten-GigabitEthernet1/0/16', 
+                        'Ten-GigabitEthernet1/0/17', 
+                        'Ten-GigabitEthernet1/0/18', 
+                        'Ten-GigabitEthernet1/0/19', 
+                        'Ten-GigabitEthernet1/0/20', 
+                        'Ten-GigabitEthernet1/0/21', 
+                        'Ten-GigabitEthernet1/0/22', 
+                        'Ten-GigabitEthernet1/0/23', 
+                        'Ten-GigabitEthernet1/0/24'                        
+                       ]}
+packetData0 =  {"sourceIP":"1.1.1.1",
+                "destinationIP":"2.2.2.2",
+                "vlan":"10",
+                "smac":"1234567890ab",
+                "dmac":"1234567890ac",
+                "mplsLabel":""
+                }               
+
+packetData1 ="0001000100101234567890ab8100000a080045000029305b400080061b780101010204040402d621f85312b3d51874da5b5d501044c4359a000000" 
+ 
+int_to_dqn = lambda st: '%i.%i.%i.%i'%(int(st[0:2],16),int(st[2:4],16),int(st[4:6],16),int(st[6:8],16)) 
+ 
+class Analyzer(Resource):
+    def post(self,time):
+        '''
+        方法为POST方法
+        调用者输入故障信息，后台解析后返回故障的分析结果
+        :return: 故障分析结果：故障设备ID,故障类型，故障根因，流转发路径
+        '''
+        response = make_response()
+        response.headers.set('Content-Type', 'application/json')  
+        body_content = request.headers.get('Content-Type', None) 
+        status = 200
+        if is_time_valid(time) is False: 
+            response = {"ret": Status.TIME_IS_INVALID.ret(), "msg": Status.TIME_IS_INVALID.msg() ,"data":{}}               
+            #status = 400  
+            return  response,status           
+        if 'application/json' in body_content:           
+            if len(request.data) > 0 and isinstance(request.json, dict):   
+                msgInfo = request.json
+                inputPort = msgInfo.get('inputPort')
+                if inputPort is not None:
+                    srcDeviceID = inputPort.get('srcDeviceID')
+                    srcPortID  = inputPort.get('srcPortID' )                   
+                    if srcDeviceID is not None and srcPortID is not None:
+                        if is_devid_valid(srcDeviceID) is False:            
+                            response = {"ret": Status.SDEVID_IS_INVALID.ret(), "msg": Status.SDEVID_IS_INVALID.msg() ,"data":{}}            
+                            #status = 400 
+                            return  response,status      
+                        if is_portid_valid(srcPortID) is False:         
+                            response = {"ret": Status.SPORTID_IS_INVALID.ret(), "msg": Status.SPORTID_IS_INVALID.msg() ,"data":{}}               
+                            #status = 400 
+                            return  response,status                            
+                        # outputPort begin可选
+                        outputPort = msgInfo.get('outputPort')
+                        if outputPort is not None:      
+                            destDeviceID = outputPort.get('destDeviceID')
+                            destPortID  = outputPort.get('destPortID' )
+                            if destDeviceID is not None and is_devid_valid(destDeviceID) is False:          
+                                response = {"ret": Status.DDEVID_IS_INVALID.ret(), "msg": Status.DDEVID_IS_INVALID.msg() ,"data":{}}                 
+                                #status = 400 
+                                return  response,status      
+                            if destPortID is not None and is_portid_valid(destPortID) is False:         
+                                response = {"ret": Status.DPORTID_IS_INVALID.ret(), "msg": Status.DPORTID_IS_INVALID.msg(),"data":{}}                 
+                                #status = 400 
+                                return  response,status                              
+                        else:
+                            destDeviceID = None
+                            destPortID  = None
+                        # outputPort end
+                        #报文解析
+                        packetData = msgInfo.get('packetData')              
+                        # 报文信息分关键字和完整报文两种
+
+
+                        #输入完整报文
+                        if packetData is not None:
+                            msgInfo["isPacketData"] = True
+                            # 检查一下16进制格式，然后调用接口
+                            if is_packetData_valid(packetData) is True:
+                                smac = packetData[0:12]
+                                dmac = packetData[12:24]
+                                offset = 24 
+                                if packetData[offset:offset+4] == "8100":
+                                    vlan = '%d' %(int(packetData[offset+4:offset+8],16))
+                                    offset = offset + 8
+                                else:
+                                    vlan = None
+                                #此时开始区分MPLS和IP
+                                #MPLS label
+                                MPLS = False
+                                mpls_labels = []
+                                ttl = 0
+                                # MPLS
+                                if packetData[offset:offset+4] == "8847":
+                                    MPLS = True
+                                    offset = offset + 4
+                                    exp_and_s_first = bin(int(packetData[offset + 5:offset + 6], 16))
+                                    ttl = int(packetData[offset + 6:offset + 8], 16)
+                                    #先判断第一个是否s是否为1，为1则只有一个label
+                                    if (exp_and_s_first[5] == "1"):
+                                        mpls_labels.append(int(packetData[offset:offset+6],16))
+                                        offset = offset + 8
+                                    else:#多个label
+                                        exp_and_s = "0b0000"
+                                        i = 0
+                                        cutlabel = ""
+                                        while (exp_and_s[5] == "0" and i<64):
+                                            exp_and_s = bin(int(packetData[offset + 5 + 8 * i:offset + 6 + 8 * i], 16))
+                                            cutlabel = packetData[offset + 8 * i:offset + 5 + 8 * i]
+                                            for i in range(5):
+                                                if cutlabel[i] != "0":
+                                                    cutlabel = cutlabel[i:6]
+                                                    break
+                                            mpls_labels.append(cutlabel)
+                                            i = i+1
+                                        offset = offset + 8*i
+
+                                    #判断MPLS LABEL后面接的是MAC还是IP
+
+                                    isIP = True
+                                    levellen = len(packetData) - offset
+                                    #如果剩余数据小于IP报文头大小
+                                    if(levellen < 40):
+                                        isIP = False
+                                    else:
+                                        hlen =int(packetData[offset+1:offset + 2], 16) * 4
+                                        #IP报文头
+                                        hlen_16  = int(packetData[offset+1:offset + 2], 16) * 2
+                                        alllen = int(packetData[offset+4:offset + 8], 16)
+                                        # 如果报文总长度小于IP报文头大小
+                                        if (hlen>alllen):
+                                            isIP = False
+                                        else:
+                                            #如果13位偏移位都是1并且MF位为1
+                                            biaozhi = bin(int(packetData[offset+12:offset + 13], 16))
+                                            #因为bin返回的可能是3位也可能是4位二进制数
+                                            if len(biaozhi) == 5:
+                                                MF = biaozhi[3]
+                                                # 偏移位首位是否为1
+                                                pianyi_1 = biaozhi[4]
+                                            elif len(biaozhi) == 6:
+                                                MF = biaozhi[4]
+                                                # 偏移位首位是否为1
+                                                pianyi_1 = biaozhi[5]
+                                            #偏移位后12位是否为1
+                                            pianyi = int(packetData[offset + 13:offset + 16], 16)
+                                            if((pianyi == 4095) and (pianyi_1 == "1") and (MF == "1")):
+                                                isIP = False
+                                            else:
+                                                sourceIP = int_to_dqn(packetData[offset+24:offset + 32])
+                                                destinationIP = int_to_dqn(packetData[offset + 32:offset + 40])
+                                                #判断目的IP和源IP合法性
+                                                if ((is_ip_valid(sourceIP)==False) or (is_ip_valid(destinationIP)==False)):
+                                                    response = {"ret": Status.SIP_IS_INVALID.ret(), "msg": Status.SIP_IS_INVALID.msg() ,"data":{}}                 
+                                                    return  response,status
+                                                else:
+                                                    #报文头检验和计算，将除了校验和外的所有字段按照16位相加（进位加到最后），得到的16位值按位
+                                                    #取反，放到校验和位中。收到报文后将整个报文头加起来位0即正确。
+                                                    #大小端影响？算法是否正确？
+                                                    sum = 0
+                                                    for i in range(10):
+                                                        sum = sum + int(packetData[offset + 4*i:offset + 4*(i+1)],16)
+                                                        sum = sum & 0xffffffff
+
+                                                        while sum > 0xffff:
+                                                           sum = (sum >> 16) + (sum & 0xffff)
+
+
+                                                    if (sum != 0xffff):
+                                                        isIP = False
+
+                                    if(isIP == True):
+                                        sourceIP = int_to_dqn(packetData[offset + 24:offset + 32])
+                                        destinationIP = int_to_dqn(packetData[offset + 32:offset + 40])
+
+                                    else:
+                                        #sourceIP = int_to_dqn(packetData[offset + 24+24+4:offset + 32++24+4])
+                                        #destinationIP = int_to_dqn(packetData[offset + 32+24+4:offset + 40+24+4])
+
+                                        sourceIP = int_to_dqn(packetData[offset + 52:offset + 60])
+                                        destinationIP = int_to_dqn(packetData[offset + 60:offset + 68])
+
+
+                                else:#非MPLS
+                                    if packetData[offset:offset + 4] == "0800":
+                                        offset = offset + 28
+                                        sourceIP = int_to_dqn(packetData[offset:offset + 8])
+                                        destinationIP = int_to_dqn(packetData[offset + 8:offset + 16])
+                                    else:
+                                        # 暂时回错，后续可能要补充
+                                        response = {"ret": Status.PACKET_IS_INVALID.ret(),
+                                                    "msg": Status.PACKET_IS_INVALID.msg(), "data": {}}
+                                        # status = 400
+                                        return response, status
+
+
+
+                                topoid = 'globalTopo'
+                                #time = '1905150000000'
+                                #开始调用analyzer
+                                if MPLS is True:
+                                    check = api_forwarding_process_handle.frame_pipeLine(topoid=topoid, srcDeviceID=srcDeviceID, destDeviceID=destDeviceID, timestamp=time,
+                                                                                         sip=sourceIP, dip=destinationIP, vlan=vlan,
+                                                                                         smac=smac, dmac=dmac, srcPortID=srcPortID, destPortID=destPortID, mpls_labels=mpls_labels, ttl=ttl)
+                                else:
+                                    check = api_forwarding_process_handle.frame_pipeLine(topoid=topoid, srcDeviceID=srcDeviceID, destDeviceID=destDeviceID, timestamp=time,
+                                                                                         sip=sourceIP, dip=destinationIP, vlan=vlan,
+                                                                                         smac=smac, dmac=dmac, srcPortID=srcPortID, destPortID=destPortID)
+
+                                ret, value = check.run()
+                                netWorkTopo,status = self.getNetworkTopo()
+                                response,status = self.save_analyze_result(value['faultType'], value['FaultDeviceID'], value['cause'], netWorkTopo, msgInfo,
+                                                    inputPort, outputPort, value['forwardPath'],time)
+
+
+
+                                if get_language() == "EN":
+                                    if len(value.get('Contex')) > 0:
+                                        value['cause'] = value.get('cause')[1] + ',' + value.get('Contex')[0]
+                                    else:
+                                        value['cause'] = value.get('cause')[1] 
+                                else:
+                                    if len(value.get('Contex')) > 0:                                
+                                        value['cause'] = value.get('cause')[2] + ',' + value.get('Contex')[1] 
+                                    else:
+                                        value['cause'] = value.get('cause')[2]                                    
+                                del value['Contex']                                
+                                response = {"ret":Status.OK.ret(), "msg":Status.OK.msg(),"data":value}  
+                            else:
+                                response = {"ret":Status.PACKET_IS_INVALID.ret(), "msg": Status.PACKET_IS_INVALID.msg() ,"data":{}}                 
+                                #status = 400
+                        #packetData为空时为发送关键字
+                        else:
+                            msgInfo["isPacketData"] = False
+                            sourceIP = msgInfo.get('sourceIP')
+                            destinationIP = msgInfo.get('destinationIP')
+                            vlan = msgInfo.get('vlan')
+
+                            if sourceIP is not None and destinationIP is not None and vlan is not None:
+                                if is_ip_valid(sourceIP) is False:          
+                                    response = {"ret": Status.SIP_IS_INVALID.ret(), "msg": Status.SIP_IS_INVALID.msg() ,"data":{}}                 
+                                    #status = 400 
+                                    return  response,status  
+                                if is_ip_valid(destinationIP) is False:         
+                                    response = {"ret": Status.DIP_IS_INVALID.ret(), "msg": Status.DIP_IS_INVALID.msg() ,"data":{}}                
+                                    #status = 400 
+                                    return  response,status   
+                                if is_vlan_valid(vlan) is False:            
+                                    response = {"ret": Status.VLAN_IS_INVALID.ret(), "msg":Status.VLAN_IS_INVALID.msg() ,"data":{}}                
+                                    #status = 400 
+                                    return  response,status
+                                # 下面的参数可选
+                                mplsLabel = msgInfo.get('mplsLabel')
+                                smac = msgInfo.get('smac')
+                                dmac = msgInfo.get('dmac')    
+                                if mplsLabel is not None and is_mplsLabel_valid(mplsLabel) is False:
+                                    response = {"ret": Status.MPLS_IS_INVALID.ret(), "msg": Status.MPLS_IS_INVALID.msg() ,"data":{}}                
+                                    #status = 400 
+                                    return  response,status       
+                                if smac is not None and is_mac_valid(smac) is False:            
+                                    response = {"ret": Status.SMAC_IS_INVALID.ret(), "msg": Status.SMAC_IS_INVALID.msg() ,"data":{}}                
+                                    #status = 400 
+                                    return  response,status   
+                                if dmac is not None and is_mac_valid(dmac) is False:            
+                                    response = {"ret": Status.DMAC_IS_INVALID.ret(), "msg": Status.DMAC_IS_INVALID.msg() ,"data":{}}                
+                                    #status = 400 
+                                    return  response,status   
+                                #待添加 smac dmac mplsLabel destPortID 没入口，多了一个topoid
+                                topoid = 'globalTopo'
+                                #time = '1905150000000'
+                                if mplsLabel is not None and is_mplsLabel_valid(mplsLabel) is True:
+                                    mpls_labels = mplsLabel.split("/")
+                                    check = api_forwarding_process_handle.frame_pipeLine(topoid=topoid, srcDeviceID=srcDeviceID, destDeviceID=destDeviceID, timestamp=time,
+                                                                                         sip=sourceIP, dip=destinationIP, vlan=vlan,
+                                                                                         smac=smac, dmac=dmac, srcPortID=srcPortID, destPortID=destPortID, mpls_labels=mpls_labels)
+                                else:
+                                    check = api_forwarding_process_handle.frame_pipeLine(topoid=topoid, srcDeviceID=srcDeviceID, destDeviceID=destDeviceID, timestamp=time,
+                                                                                         sip=sourceIP, dip=destinationIP, vlan=vlan,
+                                                                                         smac=smac, dmac=dmac, srcPortID=srcPortID, destPortID=destPortID)
+                                ret, value = check.run()
+
+                                ######################
+                                netWorkTopo,status = self.getNetworkTopo()
+                                response,status = self.save_analyze_result(value['faultType'], value['FaultDeviceID'], value['cause'],
+                                                    netWorkTopo, msgInfo,
+                                                    inputPort, outputPort, value['forwardPath'], time)
+
+
+                                if get_language() == "EN":
+                                    if len(value.get('Contex')) > 0:
+                                        value['cause'] = value.get('cause')[1] + ',' + value.get('Contex')[0]
+                                    else:
+                                        value['cause'] = value.get('cause')[1] 
+                                else:
+                                    if len(value.get('Contex')) > 0:                                
+                                        value['cause'] = value.get('cause')[2] + ',' + value.get('Contex')[1] 
+                                    else:
+                                        value['cause'] = value.get('cause')[2]   
+                                del value['Contex']                                     
+                                response = {"ret":Status.OK.ret(), "msg":Status.OK.msg(),"data":value}   
+                                # todo：发URL保存故障信息                                
+                            else:
+                                response = {"ret": Status.PARAM_IS_MULL.ret(), "msg":Status.PARAM_IS_MULL.msg() ,"data":{}}               
+                                #status = 400                            
+                    else: 
+                        response = {"ret": Status.PARAM_IS_MULL.ret(), "msg": Status.PARAM_IS_MULL.msg() ,"data":{}}                 
+                        #status = 400                            
+                else: 
+                    response = {"ret": Status.PARAM_IS_MULL.ret(), "msg": Status.PARAM_IS_MULL.msg(),"data":{}}                 
+                    #status = 400             
+            else:
+                response = {"ret": Status.BODY_IS_INVALID.ret(), "msg": Status.BODY_IS_INVALID.msg() ,"data":{}} 
+                #status = 400  
+        else:
+            response = {"ret": Status.INVALID_MEDIA_TYPE.ret(), "msg":Status.INVALID_MEDIA_TYPE.msg(),"data":{}} 
+            #status = 415
+
+
+
+        return  response,status 
+
+    def save_analyze_result(self, faultType, deviceId, cause, networkTopo, pktInfo, inputDevPort, outputDevPort, fwdPath,
+                            timeStamp):
+        faultId = str(uuid.uuid1())
+        # pktInfo/inputDevPort/outputDevPort/fwdPath如果输入为字典或列表，需要转换为字符串格式。注意保存格式和对外的故障信息输出格式尽量保持一致，方便转换
+        faultInfo = {"id": faultId,
+                     "faultType": faultType,
+                     "assetId": deviceId,
+                     "faultReason": str(cause),
+                     "topoInfo": str(networkTopo),
+                     "messageInfo": str(pktInfo),
+                     "flowIn": str(inputDevPort),
+                     "flowOut": str(outputDevPort),
+                     "flowRoute": str(fwdPath),
+                     "createTime": int(timeStamp)
+                     }
+
+        # jsondata = json.dumps(faultInfo).encode('utf-8')
+        jsondata = json.dumps(faultInfo)
+        context = []
+        status = 200
+        ret, url = config.get_histroy_save_url(context)
+        if ret is not True:
+            print(context)
+            return response,status
+        headers = {'Content-Type': 'application/json', 'username': 'admin', 'authen': 'DataCore'}
+        try:
+            responsedata = requests.post(url=url, data=jsondata, headers=headers, timeout=1000)
+        except ReadTimeout:
+            print("save histroy time out")
+            return  response,status
+        except Exception as e:
+            print(e)
+            return  response,status
+        else:
+            responsedata = responsedata.json()
+            return responsedata['code'],status
+
+    def getNetworkTopo(self):
+        '''
+        获取网络拓扑信息
+        :return: 网络拓扑信息
+        '''
+        response = make_response()
+        response.headers.set('Content-Type', 'application/json')  
+        # tbd 改为从配置文件中获取
+        status = 200
+        contex = []
+        ret, topo_url = config.get_topo_url(contex)
+
+        headers = {'Content-Type': 'application/json', 'username': 'admin', 'authen': 'DataCore'}
+        topo_url = topo_url + "?topoId=globalTopo"
+
+        try:
+            response = requests.get(url=topo_url, headers=headers, timeout=1000).json()
+        except ReadTimeout:
+            print("time out")
+            return  response,status
+        except:
+            print("error")
+            return  response,status
+        else:
+            response = {"ret": Status.OK.ret(), "msg": Status.OK.msg() ,"data":response}
+            return  response,status
+
+#获取历史故障信息
+class FaultMsgList(Resource):
+    def get(self):
+        '''
+        方法为GET方法
+        读取历史故障信息列表，用户可以查询某一时间段的故障信息，也可以输入参数进行模糊筛选
+        :return: 历史故障信息列表
+        '''        
+        response = make_response()
+        response.headers.set('Content-Type', 'application/json')  
+        Args =  request.args    
+        startTime = Args.get('startTime',None) 
+        endTime = Args.get('endTime',None)  
+        deviceId = Args.get('deviceId',None)    
+        faultType  = Args.get('faultType',None)     
+        cause = Args.get('cause',None) 
+        currPage = Args.get('currPage',None)   
+        pageSize = Args.get('pageSize',None)       
+        status = 200           
+        if startTime is not None and is_time_valid(startTime) is False:         
+            response = {"ret": Status.STARTT_IS_INVALID.ret(), "msg": Status.STARTT_IS_INVALID.msg() ,"data":{}}               
+            #status = 400  
+            return  response,status  
+        if endTime is not None and is_time_valid(endTime) is False:         
+            response = {"ret": Status.ENDT_IS_INVALID.ret(), "msg": Status.ENDT_IS_INVALID.msg(),"data":{}}               
+            #status = 400  
+            return  response,status  
+        if deviceId is not None and is_devid_valid(deviceId) is False:          
+            response = {"ret": Status.DEVID_IS_INVALID.ret(), "msg":Status.DEVID_IS_INVALID.msg() ,"data":{}}               
+            #status = 400  
+            return  response,status   
+        if cause is not None and isinstance(cause, str) is False:   
+            response = {"ret": Status.CAUSE_IS_INVALID.ret(), "msg": Status.CAUSE_IS_INVALID.msg() ,"data":{}}               
+            #status = 400  
+            return  response,status         
+        if faultType is not None and isinstance(faultType, str) is False:   
+            response = {"ret": Status.FTYPE_IS_INVALID.ret(), "msg": Status.FTYPE_IS_INVALID.msg() ,"data":{}}               
+            #status = 400  
+            return  response,status
+        if is_Num_valid(currPage) is False:  
+            response = {"ret": Status.CURRPAGE_IS_INVALID.ret(), "msg": Status.CURRPAGE_IS_INVALID.msg() ,"data":{}}               
+            #status = 400  
+            return  response,status        
+        if is_Num_valid(pageSize) is False:  
+            response = {"ret": Status.PAGESIZE_IS_INVALID.ret(), "msg": Status.PAGESIZE_IS_INVALID.msg() ,"data":{}}               
+            #status = 400  
+            return  response,status                                
+        
+        data = {}
+        if startTime is not None:
+            data["startTime"] = int(startTime)
+        if endTime is not None:
+            data["endTime"] = int(endTime)
+        if deviceId is not None:
+            data["assetId"] = deviceId
+        if faultType is not None:
+            data["faultType"] = faultType
+        if cause is not None:
+            data["faultReason"] = cause
+        if currPage is not None and pageSize is not None:
+            data["pageNum"] = currPage
+            data["pageSize"] = pageSize
+        
+        jsondata = json.dumps(data)
+        #tbd 改为从配置文件中获取
+        context = []
+        ret,url = config.get_histroy_list_url(context)
+        if ret is not True:
+            response = {"ret": Status.TIMEOUT.ret(), "msg":Status.TIMEOUT.msg() ,"data":{}}
+            return  response,status
+
+        headers = {'Content-Type': 'application/json', 'username':'admin',  'authen':'DataCore'}
+        try:
+            responsedata = requests.post(url=url, data=jsondata, headers=headers, timeout=1000)
+        except ReadTimeout:
+            response = {"ret": Status.TIMEOUT.ret(), "msg":Status.TIMEOUT.msg() ,"data":{}}
+            return  response,status
+        except:
+            response = {"ret": Status.ACCESS_DATA_FAIL.ret(), "msg":Status.ACCESS_DATA_FAIL.msg() ,"data":{}}
+            return  response,status
+        else:
+            response = responsedata.json()
+            status = responsedata.status_code
+        
+        if True != response.get("status"):
+            print(response.get("errorInfo"))
+            response = {"ret": Status.ACCESS_DATA_FAIL.ret(), "msg":Status.ACCESS_DATA_FAIL.msg() ,"data":{}}         
+            return  response,status
+
+        FaultList = {}
+        FaultList["totalPage"] = response.get("totalPage")
+        FaultList["totalCount"] = response.get("totalRecord")
+        data = response.get("data")
+        faultList = data.get("list")
+        faultMsg = []
+        for fault1 in faultList:
+            msg = {}
+            msg["faultId"] = fault1["id"]
+            msg["cause"] = fault1["faultReason"]
+            msg["time"] = fault1["createTimestamp"]
+            msg["faultType"] = fault1["faultType"]
+            msg["deviceID"] = fault1["assetId"]
+            faultMsg.append(msg)
+        FaultList["faultMsg"] = faultMsg
+    
+        response = {"ret": Status.OK.ret(), "msg": Status.OK.msg() ,"data":FaultList}         
+        return  response,status 
+#获取指点历史故障信息
+class GetFaultMsg(Resource):
+    def get(self,faultId):
+        '''
+        方法为GET方法
+        根据ID获取某一次故障的详细信息
+        :return: 故障的详细信息
+        '''        
+        response = make_response()
+        response.headers.set('Content-Type', 'application/json') 
+        status = 200            
+        if is_id_valid(faultId) is False:           
+            response = {"ret": Status.FAULTID_IS_INVALID.ret(), "msg": Status.FAULTID_IS_INVALID.msg() ,"data":{}}                
+            #status = 400 
+            return  response,status 
+            
+        #tbd 改为从配置文件中获取
+        context = []
+        ret,url = config.get_histroy_get_url(context)
+        if ret is not True:
+            response = {"ret": Status.TIMEOUT.ret(), "msg":Status.TIMEOUT.msg() ,"data":{}}
+            return  response,status
+        url = url + '?id=' + faultId
+        headers = {'Content-Type': 'application/json', 'username':'admin',  'authen':'DataCore'}
+        try:
+            responsedata = requests.get(url=url, headers=headers, timeout=1000)
+        except ReadTimeout:
+            response = {"ret": Status.TIMEOUT.ret(), "msg":Status.TIMEOUT.msg() ,"data":{}}
+            return  response,status
+        except:
+            response = {"ret": Status.ACCESS_DATA_FAIL.ret(), "msg":Status.ACCESS_DATA_FAIL.msg() ,"data":{}}
+            return  response,status
+        else:
+            response = responsedata.json()
+            status = responsedata.status_code
+            
+        if True != response.get("status"):
+            print(response.get("errorInfo"))
+            response = {"ret": Status.ACCESS_DATA_FAIL.ret(), "msg":Status.ACCESS_DATA_FAIL.msg() ,"data":{}}         
+            return  response,status
+
+        fault1 = response.get("data")
+
+        FaultMsg = {}
+        msg = {}
+        msg["faultId"] = fault1["id"]
+        #格式
+        msg["cause"] = eval(fault1["faultReason"])[1]
+        msg["time"] = fault1["createTimestamp"]
+        msg["faultType"] = fault1["faultType"]
+        msg["deviceID"] = fault1["assetId"]
+
+        FaultMsg["faultMsg"] = msg
+        
+        FaultMsg["netTopo"] = eval(fault1["topoInfo"])["data"]
+        #拼接inputMsg
+        inputMsg = {}
+        inputMsg["outputPort"] = eval(fault1["messageInfo"])["outputPort"]
+        inputMsg["inputPort"] = eval(fault1["messageInfo"])["inputPort"]
+        if eval(fault1["messageInfo"])["isPacketData"] == True:
+            inputMsg["packetData"] = eval(fault1["messageInfo"])["packetData"]
+        else:
+            packetData = {}
+            #拼接packetData
+            packetData["sourceIP"] = eval(fault1["messageInfo"])["sourceIP"]
+            packetData["destinationIP"] = eval(fault1["messageInfo"])["destinationIP"]
+            packetData["smac"] = eval(fault1["messageInfo"])["smac"]
+            packetData["dmac"] = eval(fault1["messageInfo"])["dmac"]
+            packetData["mplsLable"] = eval(fault1["messageInfo"])["mplsLable"]
+            packetData["vlan"] = eval(fault1["messageInfo"])["vlan"]
+            inputMsg["packetData"] = packetData
+        
+        
+        inputMsg["isPacketData"] = eval(fault1["messageInfo"])["isPacketData"]       
+        FaultMsg["inputMsg"] = inputMsg
+        
+        FaultMsg["forwardPath"] = eval(fault1["flowRoute"])
+        
+        response = {"ret": Status.OK.ret(), "msg": Status.OK.msg() ,"data":FaultMsg}               
+        #response,status = URL                                                                
+        
+        return  response,status         
+        
+class FaultTypeList(Resource):
+    def get(self):
+        '''
+        方法为GET方法
+        获取故障类型列表
+        :return: 故障类型列表
+        '''        
+        response = make_response()
+        response.headers.set('Content-Type', 'application/json')  
+        status = 200 
+        response = {"ret": Status.OK.ret(), "msg": Status.OK.msg(),"data":FaultType}         
+        #response,status = URL                                                                
+        
+        return  response,status   
+
+class I18N(Resource):
+    def get(self):
+        '''
+        方法为GET方法
+        国际化参数存取
+        :return: 
+        '''        
+        response = make_response()
+        response.headers.set('Content-Type', 'application/json')  
+        status = 200   
+        i18n = request.args.get('i18n',"EN") 
+        if i18n == "EN" or i18n == "CHS":
+            change_language(i18n)
+            response = {"ret": Status.OK.ret(), "msg": Status.OK.msg(),"data":{"i18n":i18n}}              
+        else:
+            response = {"ret": Status.I18N_IS_INVALID.ret(), "msg": Status.I18N_IS_INVALID.msg() ,"data":{}}   
+
+        return  response,status            
+        
+class PortList(Resource):
+    def get(self,time):
+        '''
+        方法为GET方法
+        获取端口列表信息
+        :return: 端口列表信息
+        '''        
+
+        response = make_response()
+        response.headers.set('Content-Type', 'application/json')  
+        status = 200
+        Args =  request.args
+        if is_time_valid(time) is False:            
+            response = {"ret": Status.TIME_IS_INVALID.ret(), "msg": Status.TIME_IS_INVALID.msg() ,"data":{}}               
+            #status = 400  
+            return  response,status 
+            
+        deviceId  = Args.get('deviceId',None)  
+        IP = Args.get('IP',None)  
+        if deviceId is not None:
+            if is_devid_valid(deviceId) is False:          
+                response = {"ret": Status.DEVID_IS_INVALID.ret(), "msg":Status.DEVID_IS_INVALID.msg() ,"data":{}}               
+                #status = 400  
+                return  response,status 
+        elif IP is not None:
+            if is_ip_valid(IP) is False:          
+                response = {"ret": Status.IP_IS_INVALID.ret(), "msg": Status.IP_IS_INVALID.msg() ,"data":{}}                 
+                #status = 400 
+                return  response,status
+
+            contex = []
+            ret, topo_url = config.get_topo_url(contex)
+            if ret is not True:
+                response = {"ret": Status.ACCESS_DATA_FAIL.ret(), "msg": Status.ACCESS_DATA_FAIL.msg(), "data": {}}
+                return response, status
+            headers = {'Content-Type': 'application/json', 'username': 'admin', 'authen': 'DataCore'}
+            topo_url = topo_url + "?topoId=globalTopo"
+            try:
+                response = requests.get(url=topo_url, headers=headers, timeout=1000).json()
+            except ReadTimeout:
+                response = {"ret": Status.TIMEOUT.ret(), "msg": Status.TIMEOUT.msg(), "data": {}}
+                return response, status
+            except:
+                response = {"ret": Status.ACCESS_DATA_FAIL.ret(), "msg": Status.ACCESS_DATA_FAIL.msg(), "data": {}}
+                return response, status
+            if response.get('success') is not True:
+                response = {"ret": Status.ACCESS_DATA_FAIL.ret(), "msg": Status.ACCESS_DATA_FAIL.msg(), "data": {}}
+                return response, status
+            ret = response.get('result', None)
+            if ret is None:
+                response = {"ret": Status.ACCESS_DATA_FAIL.ret(), "msg": Status.ACCESS_DATA_FAIL.msg(), "data": {}}
+                return response, status
+            node_list = ret.get('nodes', None)
+            if node_list is None:
+                response = {"ret": Status.ACCESS_DATA_FAIL.ret(), "msg": Status.ACCESS_DATA_FAIL.msg(), "data": {}}
+                return response, status
+            for node in node_list:
+                if IP == node.get('assetNetAddress', None):
+                    deviceId = node.get('assetId', None)
+                    break
+            if deviceId is None:
+                response = {"ret": Status.DEVID_IS_INVALID.ret(), "msg": Status.DEVID_IS_INVALID.msg(), "data": {}}
+                return response, status
+        else:
+            response = {"ret": Status.PARAM_IS_MULL.ret(), "msg": Status.PARAM_IS_MULL.msg(),"data":{}}                 
+            #status = 400 
+            return  response,status
+        # tbd 改为从配置文件中获取
+        context = []
+        ret,url = config.get_intf_ifmgr_url(context)
+        headers = {'Content-Type': 'application/json', 'username': 'admin', 'authen': 'DataCore'}
+        data = {'assetId': deviceId,'time':int(time)}
+        #data = {'assetId': "d7075de4-d98b-4269-a444-ed07c4137aaf",'time':1568106000000}
+        data = json.dumps(data)
+
+        try:
+            response = requests.post(url=url, data=data, headers=headers, timeout=1000).json()
+        except ReadTimeout:
+            print(" get port list time out")
+            return response, status
+        except:
+            print("get port list error")
+            return response, status
+        else:
+            # What if response is None
+            deviceList = response['data']['list']
+            portLists = []
+            for i in range(len(deviceList)):
+                intfname = deviceList[i]['name']
+                if intfname.find("GigabitEthernet") != -1:
+                    portLists.append(intfname)
+            ports = {"portList":portLists}
+            response = {"ret": Status.OK.ret(), "msg": Status.OK.msg() ,"data":ports}
+            return response,status
+
+class NetworkTopo(Resource):
+    def get(self,time):
+        '''
+        方法为GET方法
+        获取网络拓扑信息
+        :return: 网络拓扑信息
+        '''        
+        status = 200
+        response = make_response()
+        response.headers.set('Content-Type', 'application/json')  
+        contex = []
+        ret, topo_url = config.get_topo_url(contex)
+        # tbd 改为从配置文件中获取
+        headers = {'Content-Type': 'application/json', 'username': 'admin', 'authen': 'DataCore'}
+        topo_url = topo_url + "?topoId=globalTopo"
+        try:
+            response = requests.get(url=topo_url, headers = headers, timeout=1000).json()
+        except ReadTimeout:
+            return  response,status 
+        except:
+            return  response,status
+        else:
+            response = {"ret": Status.OK.ret(), "msg": Status.OK.msg() ,"data":response}
+
+            if not os.path.exists(depoloy_dir):
+                os.mkdir(depoloy_dir)
+            #r=requests.get(get_topo_url,params=content)
+            for asset in response["data"].text['result']['nodes']:
+                if asset['assetId'] not in container_set:
+                    container_set["assetId"] = {
+                        "assetName": asset['assetName']
+                    }
+
+                    knowledge_graph_service_path = os.path.join(depoloy_dir, asset['assetId']+service_yaml_name)
+                    render(knowledge_graph_service_template_path, knowledge_graph_service_path,
+                    itoa_knowledge_graph="itoa-knowledge-graph"+str(nodePort)
+                    )
+
+                    nodePort = nodePort+5
+                    knowledge_graph_rc_path = os.path.join(depoloy_dir, asset['assetId']+rc_yaml_name)
+                    render(knowledge_graph_rc_template_path, knowledge_graph_rc_path,
+                    itoa_knowledge_graph="itoa-knowledge-graph"+str(nodePort)
+                    )
+                    operation = K8sNetworkOperation()
+                    with open(knowledge_graph_service_path) as f:
+                        resources = yaml.load_all(f)
+                        operation.deploy_k8s_resource(resources)
+        
+
+            return  response,status
+
+    @async_call
+    def get_deoploy_result(self):
+        time.sleep(5)
+        print("deploy-sucess")
+        time.sleep(5)
+        print("pod-sucess")               
+        pass
+
+class Scheduler(Resource):
+    def post(self):
+        response = make_response()
+        response.headers.set('Content-Type', 'application/json')  
+        body_content = request.headers.get('Content-Type', None) 
+        status = 200
+        if 'application/json' in body_content: 
+            if len(request.data) > 0 :   
+                msgInfo = request.json       
+            else:
+                response = {"ret": Status.BODY_IS_INVALID.ret(), "msg": Status.BODY_IS_INVALID.msg() ,"data":{}} 
+                status = 400  
+        else:
+            response = {"ret": Status.INVALID_MEDIA_TYPE.ret(), "msg":Status.INVALID_MEDIA_TYPE.msg(),"data":{}} 
+            status = 415
+        return  response,status 
+
+api.add_resource(Analyzer, '/kgraph/v1.0/analyzer/<time>')
+api.add_resource(NetworkTopo, '/kgraph/v1.0/NetTopo/<time>')
+api.add_resource(FaultMsgList, '/kgraph/v1.0/faultMsg')
+api.add_resource(GetFaultMsg, '/kgraph/v1.0/faultMsg/<faultId>')
+api.add_resource(FaultTypeList, '/kgraph/v1.0/faultTypeList')
+api.add_resource(I18N, '/kgraph/v1.0/i18n/i18nParam')
+api.add_resource(PortList, '/kgraph/v1.0/PortList/<time>')
+api.add_resource(Scheduler, '/kgraph/v1.0/Scheduler')
+
+if __name__ == '__main__': 
+    # with app.app_context():
+    #     status = 200
+    #     response = make_response()
+    #     response.headers.set('Content-Type', 'application/json')  
+    #     contex = []
+    #     ret, topo_url = config.get_topo_url(contex)
+    #     # tbd 改为从配置文件中获取
+    #     headers = {'Content-Type': 'application/json', 'username': 'admin', 'authen': 'DataCore'}
+    #     topo_url = str(topo_url) + "?topoId=globalTopo"
+    #     response = requests.get(url=topo_url, headers = headers, timeout=1000).json()
+    #     container_set = {}
+    #     to_deploy_k8s.deployAnalyzer(container_set, response)
+    #_thread.start_new_thread(app.run, ())
+    #_thread.start_new_thread( get_topo, () )
+    #app.run(host='0.0.0.0', port=5050)
+    # with app.app_context():
+    #     get_topo()
+        #getTopoDeploy(0.1)
+        # _thread.start_new_thread
+        # _thread.start_new_thread( getTopoDeploy, (10,) )
+    
+
+
+
+
+    app.run(host='0.0.0.0', port=5050)
+
+
+
+
+
