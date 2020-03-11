@@ -1,0 +1,143 @@
+Rook-Ceph部署及配置介绍
+1	ceph基础知识和基础架构认识
+1.1	Ceph基础介绍
+Ceph是一个可靠地、自动重均衡、自动恢复的分布式存储系统，根据场景划分可以将Ceph分为三大块，分别是对象存储、块设备存储和文件系统服务。在虚拟化领域里，比较常用到的是Ceph的块设备存储，比如在OpenStack项目里，Ceph的块设备存储可以对接OpenStack的cinder后端存储、Glance的镜像存储和虚拟机的数据存储，比较直观的是Ceph集群可以提供一个raw格式的块存储来作为虚拟机实例的硬盘。
+Ceph相比其它存储的优势点在于它不单单是存储，同时还充分利用了存储节点上的计算能力，在存储每一个数据时，都会通过计算得出该数据存储的位置，尽量将数据分布均衡，同时由于Ceph的良好设计，采用了CRUSH算法、HASH环等方法，使得它不存在传统的单点故障的问题，且随着规模的扩大性能并不会受到影响。
+1.2 Ceph架构
+支持三种接口：
+ 
+•	Object：有原生的API，而且也兼容Swift和S3的API。
+•	Block：支持精简配置、快照、克隆。
+•	File：Posix接口，支持快照。
+ 
+1.3	Ceph的核心组件及概念介绍
+Rados：本身是一个完整的对象存储系统,Ceph所有的存储功能都是基于Rados实现。
+RADOS位于ceph的最下层，Reliable, Autonomic, Distributed Object Store，即可靠的、自动化的、分布式的对象存储。CEPH所有的存储功能都是基于RADOS实现,RADOS由大量的存储设备节点组成，每个节点拥有自己的硬件资源（CPU、内存、硬盘、网络），并运行着操作系统和文件系统。
+
+LIBRADOS: 是对RADOS进行抽象和封装，并向上层提供API。为应用程度提供访问接口，同时也为块存储、对象存储、文件系统提供原生的接口。
+
+RGW: 网关接口，提供对象存储服务。它使用librgw和librados来实现允许应用程序与Ceph对象存储建立连接。并且提供S3 和 Swift 兼容的RESTful API接口。最直接的理解就是一个协议转换层，把从上层应用符合S3或Swift协议【三级存储：Account/Bucket/Object(账户/桶/对象)】的请求转换成rados的请求， 将数据保存在rados集群中。
+Ceph OSD：OSD的英文全称是Object Storage Device，它的主要功能是存储数据、复制数据、平衡数据、恢复数据等，与其它OSD间进行心跳检查等，并将一些变化情况上报给Ceph Monitor。一般情况下一块硬盘对应一个OSD，由OSD来对硬盘存储进行管理，当然一个分区也可以成为一个OSD。
+Ceph OSD的架构实现由物理磁盘驱动器、Linux文件系统和Ceph OSD服务组成，对于Ceph OSD Daemon而言，Linux文件系统显性的支持了其拓展性，一般Linux文件系统有好几种，比如有BTRFS、XFS、Ext4等，BTRFS虽然有很多优点特性，但现在还没达到生产环境所需的稳定性，一般比较推荐使用XFS。
+伴随OSD的还有一个概念叫做Journal盘，一般写数据到Ceph集群时，都是先将数据写入到Journal盘中，然后每隔一段时间比如5秒再将Journal盘中的数据刷新到文件系统中。一般为了使读写时延更小，Journal盘都是采用SSD，一般分配10G以上，当然分配多点那是更好，Ceph中引入Journal盘的概念是因为Journal允许Ceph OSD功能很快做小的写操作；一个随机写入首先写入在上一个连续类型的journal，然后刷新到文件系统，这给了文件系统足够的时间来合并写入磁盘，一般情况下使用SSD作为OSD的journal可以有效缓冲突发负载。
+Ceph Monitor：是一个监视器，负责监视Ceph集群，维护Ceph集群的健康状态，同时维护着Ceph集群中的各种Map图，比如OSD Map、Monitor Map、PG Map和CRUSH Map，这些Map统称为Cluster Map，Cluster Map是RADOS的关键数据结构，管理集群中的所有成员、关系、属性等信息以及数据的分发，比如当用户需要存储数据到Ceph集群时，OSD需要先通过Monitor获取最新的Map图，然后根据Map图和object id等计算出数据最终存储的位置。
+一个典型的Ceph 集群通常包含多个monitor 节点。多monitor 的Ceph 架构使用了仲裁( quorum ) ，使用Paxos 算法为集群提供了分布式决策机制。集群中monitor 数目应该是奇数，最低要求是一个monitor 节点，推荐的数是3 。自monitor开始仲裁操作，至少需要保证一半以上的monitor 始终处于可用状态，这样才可以防止其他系统可以看到的脑裂问题。这就是为什么推荐使用奇数个monitor。在所有的集群monitor 巾，其中有一个是领导者( leader ) 。如果领导者monitor不可用其他monitor 节点也有权成为领导者。生产环境下的集群必须至少有三个monitor节点来提供高可用性。
+
+Ceph MDS：全称是Ceph MetaData Server，主要保存的文件系统服务的元数据，但对象存储和块存储设备是不需要使用该服务的。
+POOL：Pool是存储对象的逻辑分区，规定了数据冗余的类型以及对应的副本分布策略。目前实现了两种pool类型：replicated类型和Erasure Code类型。
+关系说明：
+(1) 一个pool由多个PG构成，一个PG只能属于一个POOL
+(2) 同一个Pool中的PG具有相同的类型，比如，如Pool为副本类型，则Pool中所有的PG都是多副本的
+
+PG: 全称Placement Groups，是一个逻辑的概念，一个PG包含多个OSD。引入PG这一层其实是为了更好的分配数据和定位数据。它是对象的集合，该集合里的所有对象都具有相同的放置策略：对象的副本都分布在相同的OSD列表上。服务端数据均衡和恢复的最小粒度就是PG；
+关系说明：
+(1) PG有主从之分，对于多副本而言，一个PG的主从副本分布在不同的OSD上；
+(2) 一个对象只能属于一个PG，一个PG包含很多个对象
+(3) 一个PG对应于一个OSD列表，PG的所有对象对存放在对应的OSD列表上
+pg是用来存放object的，pgp相当于是pg存放osd的一种排列组合，举个例子，比如有3个osd，osd.1、osd.2和osd.3，副本数是2，如果pgp的数目为1，那么pg存放的osd组合就只有一种，可能是[osd.1,osd.2]，那么所有的pg主从副本分别存放到osd.1和osd.2，如果pgp设为2，那么其osd组合可以两种，可能是[osd.1,osd.2]和[osd.1,osd.3]，是不是很像我们高中数学学过的排列组合，pgp就是代表这个意思。一般来说应该将pg和pgp的数量设置为相等
+Object：数据存储的基本单元，一般默认为4MB
+一个对象有三部分组成：
+(1) 对象标志（ID）：唯一标识一个对象。
+(2) 对象的数据：其在本地文件系统中对应一个文件，对象的数据就保存在文件中。
+(3) 对象的元数据：以Key-Value（键值对）的形式，可以保存在文件对应的扩展属性中。
+1.4一个文件在ceph里怎么做的读取和存储
+ 
+
+　　首先用户把一个文件放到ceph集群后，先把文件进行分割，分割为等大小的小块，小块叫object，然后这些小块跟据一定算法跟规律，算法是哈希算法，放置到PG组里，就是归置组，然后再把归置组放到OSD里面。
+　　无论使用哪种存储方式（对象、块、文件系统），存储的数据都会被切分成Objects。Objects size大小可以由管理员调整，通常为2M或4M。每个对象都会有一个唯一的OID，由ino与ono生成，虽然这些名词看上去很复杂，其实相当简单。
+ino：即是文件的File ID，用于在全局唯一标识每一个文件
+ono：则是分片的编号
+比如：一个文件FileID为A，它被切成了两个对象，一个对象编号0，另一个编号1，那么这两个文件的oid则为A0与A1。
+File —— 此处的file就是用户需要存储或者访问的文件。对于一个基于Ceph开发的对象存储应用而言，这个file也就对应于应用中的“对象”，也就是用户直接操作的“对象”。
+　　Ojbect —— 此处的object是RADOS所看到的“对象”。Object与上面提到的file的区别是，object的最大size由RADOS限定（通常为2MB或4MB），以便实现底层存储的组织管理。因此，当上层应用向RADOS存入size很大的file时，需要将file切分成统一大小的一系列object（最后一个的大小可以不同）进行存储。
+PG（Placement Group）—— 顾名思义，PG的用途是对object的存储进行组织和位置映射。具体而言，一个PG负责组织若干个object（可以为数千个甚至更多），但一个object只能被映射到一个PG中，即，PG和object之间是“一对多”映射关系。同时，一个PG会被映射到n个OSD上，而每个OSD上都会承载大量的PG，即，PG和OSD之间是“多对多”映射关系。在实践当中，n至少为2，如果用于生产环境，则至少为3。一个OSD上的PG则可达到数百个。事实上，PG数量的设置牵扯到数据分布的均匀性问题。关于这一点，下文还将有所展开。
+　　OSD —— 即object storage device，OSD的数量事实上也关系到系统的数据分布均匀性，因此其数量不应太少。在实践当中，至少也应该是数十上百个的量级才有助于Ceph系统的设计发挥其应有的优势。
+基于上述定义，便可以对寻址流程进行解释了。具体而言， Ceph中的寻址至少要经历以下三次映射：
+（1）File -> object映射
+（2）Object -> PG映射，hash(oid) & mask -> pgid
+（3）PG -> OSD映射，CRUSH算法
+　　CRUSH，Controlled Replication Under Scalable Hashing，它表示数据存储的分布式选择算法， ceph 的高性能/高可用就是采用这种算法实现。CRUSH 算法取代了在元数据表中为每个客户端请求进行查找，它通过计算系统中数据应该被写入或读出的位置。CRUSH能够感知基础架构，能够理解基础设施各个部件之间的关系。并CRUSH保存数据的多个副本，这样即使一个故障域的几个组件都出现故障，数据依然可用。CRUSH 算是使得 ceph 实现了自我管理和自我修复。
+RADOS 分布式存储相较于传统分布式存储的优势在于:
+　　1. 将文件映射到object后，利用Cluster Map 通过CRUSH 计算而不是查找表方式定位文件数据存储到存储设备的具体位置。优化了传统文件到块的映射和Block MAp的管理。
+　　2. RADOS充分利用OSD的智能特点，将部分任务授权给OSD，最大程度地实现可扩展
+如何查找存储文件的物理位置
+ceph osd lspools 查看创建的pool
+ 
+
+上传测试文件
+rados -p myfs-data0 put hello-world.txt /tmp/hello-world.txt
+
+查看保存的文件对象
+rados -p  myfs-data0  ls
+ 
+ 
+查找文件对应的pg和OSD集合
+ 
+ceph osd map myfs-data0  hello-world.txt
+ 
+e62 是osd map 版本ID 62；对象hello-world.txt属于PG 3.3 ； 其数据分别分布在osd0，osd1 上。
+ 
+`cd /var/lib/rook/osd1/current`进入osd1所在的物理存储文件夹
+`ls -l |grep -i 3.3`找出和PG（3.3）相关的文件夹
+`cd 3.3_head`进入该PG文件夹
+`ls -l `就可以看到我们存储的数据的详细信息
+
+
+
+1.5 常用指令
+查看各种Map的信息可以通过如下命令：ceph osd(mon、pg) dump
+monitor map它维护着monitor 节点间端到端的信息，其中包括Ceph 集群ID 、monitor 主机名、IP 地址及端口号。它还存储着当前map 的创建版本和最后一次修改的信息。可以通过下面的命令检查集群的monitor map:
+# ceph mon dump
+
+OSD map :它存储着一些常见的信息，如集群ID、OSD map 创建版本和最后一次修改信息，以及与池相关的信息(如池名字、池ID 、类型、副本数和归置组) 。它还存储着OSD 的一些信息，如数目、状态、权重、最近处于clean 状态的间隔以及OSD 主机等信息。可以通过执行以下命令获取集群的OSD map:
+# ceph osd dump
+
+PG map :它存储着PG的版本、时间戳、最新的OSD map 版本、存储使用信息。它同时也跟踪每个归置组的ID 、对象数、状态时间戳、OSD 的up集合、OSD 的acting 集合，最后还有清洗等信息。要检查集群的PG map ，执行:
+# ceph pg dump
+
+CRUSH map:它存储着集群的存储设备信息、故障域层次结构以及在故障域中定义如何存储数据的规则。要查看集群的CRUSH map ，执行:
+# ceph osd crush dump
+MDS map:它存储着当前MDS map 的版本，map 的创建和修改时间，数据和元数据池的ID ，集群中MDS 的数目以及MDS 的状态。要查看集群MDS map ，执行:
+# ceph mds dump
+
+ceph df	查看空间使用情况
+ceph status	集群状态概览
+ceph -w	持续输出集群状态
+rados df      	查看ceph集群中有多少个pool,并且每个pool容量及利用情况
+ceph osd pool get myfs-data0 pg_num	获取当前pool的PG数
+ceph osd pool get  myfs-data0 pgp_num	获取当前pool的PGP数
+ceph osd dump|grep -i size	检查存储池的副本数
+ceph fs ls /ceph fs status	检查CephFs
+
+
+2 Rook-ceph 集群快速部署
+2.1 依赖
+Kubernetes v1.11或者更高的版本。
+2.2	部署指令
+首先通过git 拉取所需版本，目前最新的release版本为1.2
+git clone --single-branch --branch release-1.2 https://github.com/rook/rook.git
+cd cluster/examples/kubernetes/ceph
+kubectl create -f common.yaml
+kubectl create -f operator.yaml
+kubectl create -f cluster-test.yaml
+正常情况下集群就创建成功了。
+启动Rook Toolbox
+kubectl create -f toolbox.yaml
+查看toolbox
+kubectl get po -n rook-ceph |grep toolbox 
+
+ (目前部署的代码版本是1.2.0版本)
+2.3 yaml配置讲解
+    ceph cluster配置
+ filesystem.yaml 配置详细解释
+2.4 Ceph dashboard
+Dashboard 外部访问svc 启动
+kubectl create -f dashboard-external-https.yaml
+ 
+管理账户admin,获取登录密码：
+kubectl -n rook-ceph get secret rook-ceph-dashboard-password -o yaml | grep "password:" | awk '{print $2}' | base64 --decode
+ 
+登陆后的界面
+ 
+2.5 Ceph OSD Management
+https://rook.github.io/docs/rook/v1.2/ceph-osd-mgmt.html
