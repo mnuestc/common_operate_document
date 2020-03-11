@@ -1,0 +1,129 @@
+一、	多容器服务管理的部署创建
+
+1.	svc-manager 创建：
+[root@matrix01 template]# kubectl delete -f manager.yaml 
+deployment.extensions "svc-manager-deploy" deleted
+service "svc-manager" deleted
+[root@matrix01 template]# kubectl create -f manager.yaml 
+deployment.extensions/svc-manager-deploy created
+service/svc-manager created
+
+2.	svc-manager 状态检查：
+ 
+3.	查看svc-manager日志状态：
+[root@matrix01 ~]# kubectl logs -f -n itoa svc-manager-deploy-749d6979cb-lhz7n
+/root/cfg/url.ini
+177.177.23.202 svc-manager-deploy-749d6979cb-lhz7n
+2020.03.03-02:57:28 1583204248.9195697
+/root/serviceMangerGrpc/grpcManagerServer
+/root/serviceMangerGrpc/grpcManagerServer/depoloy/
+/root/serviceMangerGrpc/grpcManagerServer/template/
+/root/serviceMangerGrpc/grpcManagerServer/template/unit.yaml
+running...
+
+4.	外部脚本测试：
+清除前期残留
+kubectl delete deployment -n itoa $(kubectl get deployment -n itoa | grep itoams |awk '{print $1}')
+kubectl delete svc -n itoa $(kubectl get svc -n itoa | grep itoams |awk '{print $1}')
+
+
+二、	GRPC使用方式
+工作gRPC可以在一个 .proto 文件中定义服务并使用任何支持它的语言去实现客户端和服务器
+反过来，它们可以在各种环境中，从Google的服务器到你自己的平板电脑—— gRPC 帮你解决了不同语言及环境间通信的复杂性。
+使用 protocol buffers 还能获得其他好处，包括高效的序列号，简单的 IDL 以及容易进行接口更新。
+安装
+grpc地址：https://github.com/grpc/grpc
+
+pip install grpcio    	#gRPC 的安装
+pip install protobuf  	#ProtoBuf 相关的 python 依赖库
+pip install grpcio-tools  #python grpc 的 protobuf 编译工具
+应用
+gRPC包括3部分：
+
+.proto部分，用protocol buffers去定义 gRPC服务，并可通过grpc_tools进行编译
+server端
+client端
+定义服务
+使用 protocol buffers去定义 gRPC service 和方法 request 以及 response 的类型，实例程序中helloword方法的.proto文件
+
+> helloword.proto
+// 定义服务.
+service Greeter {
+  // Sends a greeting
+  rpc SayHello (HelloRequest) returns (HelloReply) {}  //定义rpc方法
+  rpc SayHelloAgain (HelloRequest) returns (HelloReply) {} //简单的rpc
+}
+
+// 请求的参数name和phone,值为int类型不可重复
+message HelloRequest {
+  string name = 1;
+  string phone = 2;
+}
+
+// 返回的参数message,值为int类型
+message HelloReply {
+  string message = 1;
+  //string idcard = 2;
+}
+gRPC 允许你定义4种类型的 service 方法：具体参考
+
+生成客户端和服务器端代码
+接下来你需要从 .proto 的服务定义中生成 gRPC 客户端和服务器端的接口。你可以通过 protocol buffer 的编译器 protoc 以及一个特殊的 gRPC Python 插件来完成。
+
+ python -m grpc_tools.protoc -I../../protos --python_out=. --grpc_python_out=. ../../protos/helloworld.proto
+运行后根据helloworld.proto生成2个文件：helloword_pb2.py和helloword_pb2_grpc.py
+
+定义在helloworld.proto中的消息类
+定义在helloworld.proto中的服务抽象类
+class GreeterServicer(object)：定义了Greeter（helloworld.proto中service Greeter { }）的实现接口
+class GreeterStub(object)：可以被客户端用来激活 helloword RPC
+应用使用的函数：
+add_GreeterServicer_to_server(servicer, server)：将GreeterServicer添加到服务端
+创建服务端（server）
+创建和运行service可以分为两部分：
+
+实现服务接口：.proc中定义的rpc函数。
+运行一个 gRPC 服务器，监听来自客户端的请求并传输服务的响应。
+实现服务接口
+class Greeter(helloworld_pb2_grpc.GreeterServicer):
+
+    def SayHello(self, request, context):
+        return helloworld_pb2.HelloReply(message='Hello, %s!' % request.name)
+
+    def SayHelloAgain(self, request, context):
+        return helloworld_pb2.HelloReply(message='Hello Again, %s!' % request.name)
+Greeter 是类helloworld_pb2_grpc.GreeterServicer的子类
+Greeter实现helloworld.proto中service Greeter { }中定义的rpc函数
+启动服务器
+启动一个gRPC服务器，这样客户端才可以使用服务
+
+def serve():
+    server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
+    helloworld_pb2_grpc.add_GreeterServicer_to_server(Greeter(), server)
+    server.add_insecure_port('[::]:50051')
+    server.start()
+    try:
+        while True:
+            time.sleep(_ONE_DAY_IN_SECONDS)
+    except KeyboardInterrupt:
+        server.stop(0)
+因为 start() 不会阻塞，如果运行时你的代码没有其它的事情可做，你可能需要循环等待。
+
+创建客户端（client）
+def run():
+    # NOTE(gRPC Python Team): .close() is possible on a channel and should be
+    # used in circumstances in which the with statement does not fit the needs
+    # of the code.
+    with grpc.insecure_channel('localhost:50051') as channel:
+        stub = helloworld_pb2_grpc.GreeterStub(channel)  //创建一个stub
+        response = stub.SayHello(helloworld_pb2.HelloRequest(name='you'))
+        print("Greeter client received: " + response.message)
+        response = stub.SayHelloAgain(helloworld_pb2.HelloRequest(name='yy'))
+        print("Greeter client received: " + response.message)
+
+
+
+域名访问：
+#域名端口
+http://itoa-ndpBusiness.itoa:8080
+/NDPBusiness/netTopo/getTopoInfo?topoId=globalTopo
