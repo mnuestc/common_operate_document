@@ -1,0 +1,301 @@
+ps -ef
+kill -s 9 1
+
+kubectl delete deployment -n itoa $(kubectl get deployment -n itoa | grep itoams |awk '{print $1}')
+kubectl delete svc -n itoa $(kubectl get svc -n itoa | grep itoams |awk '{print $1}')
+
+
+kill -s 9 1827
+
+cd existing_folder
+git init
+git remote add origin ssh://git@10.153.0.93:21102/BlockChain/devops.git
+git add .
+git commit -m "Initial commit"
+git push -u origin master
+git remote -v
+git fetch origin master
+git branch -r
+git branch -a
+git checkout master
+git checkout -b newBrach origin/master
+
+docker pull 10.114.134.246:8088/rook/ceph:v1.2.0
+
+
+
+dir(Object)
+
+
+
+
+
+
+
+
+
+
+
+
+
+你应该说的是这个 docker.service???在ExecStart后添加--insecure-reqistry=10.114.134.253:8088 
+/etc/systemd/system/multi-user.target.wants/docker.service
+docker tag SOURCE_IMAGE[:TAG] 10.114.134.246:8088/devops/IMAGE[:TAG] 
+docker push 10.114.134.246:8088/devops/IMAGE[:TAG] 
+
+curl -XGET http://10.114.134.246:8088/v2/_catalog
+
+/etc/systemd/system/docker.service
+
+修改内核如何生效
+source /etc/profile
+
+docker pull 10.114.134.253:8088/itoa/itoa-knowledge-graph-slave:0.32
+
+sudo docker run -u root -p 8888:8080 -p 50000:50000 -v /var/devops/jenkins-data:/var/jenkins_home -v /var/run/docker.sock:/var/run/docker.sock jenkins-docker-all:0.01 
+
+
+/etc/sysconfig/docker
+docker rmi
+以datacore镜像为例：
+导入镜像文件： docker load -i datacore.tar
+推送镜像文件到harbor仓库： docker push itoa/itao-datacore:V100R001B01D004SP01
+删除本地残留的镜像，防止对之后的替换造成影响: docker rmi  itoa/itao-datacore:V100R001B01D004SP01
+直接重启pod即可kubectl delete pod -n itoa itoa-ai-4gl47
+
+上传新镜像就使用yaml文件启动服务
+
+
+
+
+简述redis：
+redis为了达到最快的读写速度将数据都读到内存中，并通过异步的方式将数据写入磁盘。所以redis具有快速和持久化的特征。redis支持的数据类型：string（字符串），hash（哈希），list（列表），set（集合）及zset(sorted set：有序集合)。
+
+redis的并发竞争问题如何解决
+方案一：可以使用独占锁的方式，类似操作系统的mutex机制。（网上有例子，http://blog.csdn.net/black_ox/article/details/48972085 不过实现相对复杂，成本较高）
+
+方案二：使用乐观锁的方式进行解决（成本较低，非阻塞，性能较高）
+
+
+
+
+export HOST_PORT=1234
+export ASSETID="test"
+export MANAGER_HOST="10.114.134.246"
+
+
+
+export $PATH:/home/xyz/Tesseract/bintesseract可执行文件目录
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH://home/xyz/Tesseract/lib其依赖库lept的路径
+export TESSDATA_PREFIX=/home/xyz/Tesseract/share其依赖的训练数据文件所在路径
+
+curl http://10.114.134.253:8088/v2/_catalog
+2019-11-20 03:24:04.210381-2019-11-20 03:24:18.231730
+curl -XGET http://10.114.134.253:8088/v2/_catalog
+
+
+docker exec -it k8s_itoa-knowledge-graph_itoa-knowledge-graph-slave-11-32e07e-648df9944-2v754_itoa_254ab9f9-fa3b-11e9-831a-04d7a53fbc4c_0 /bin/bash
+
+
+docker exec -it a8f19dabdc9e /bin/bash
+docker cp 315bc1299a02:/root /root /gaea-platform/mounted/operator-dashboard/
+docker ps | grep slave-3-
+docker build -t itoa/itoa-knowledge-graph-slave:0.00 .
+docker push itoa/itoa-knowledge-graph-slave
+docker tag IMAGEID(镜像id) REPOSITORY:TAG（仓库：标签）
+
+kubectl logs -f 
+kubectl exec -it itoa-knowledge-graph-87lxs --namespace=itoa -- /bin/bash
+kubectl top pods --all-namespaces | grep graph
+kubectl get pods --all-namespaces -o wide | grep graph
+kubectl get pods --all-namespaces -o wide | grep slave
+kubectl get pods --all-namespaces -o wide | grep manager
+
+
+http://10.114.134.253:8088
+
+kubectl get namespaces
+kubectl describe service/itoa-ndpbusiness -n itoa
+kubectl api-resources
+kubectl api-versions
+kubectl logs -f itoa-k -n itoa
+
+docker run \
+  -u root \
+  --rm \  
+  -d \ 
+  -p 8080:8080 \ 
+  -p 50000:50000 \ 
+  -v jenkins-data:/var/jenkins_home \ 
+  -v /var/run/docker.sock:/var/run/docker.sock \ 
+  jenkins:latest 
+
+
+
+docker run -p 8080:8080 -p 50000:50000 jenkins:latest 
+
+
+以datacore镜像为例：
+docker save 9610cfc68e8d > /home/myubuntu-save-1204.tar
+cat alibaba-rocketmq-3.2.6.tar.gz | docker import - rocketmq:3.2.6
+cat jenkins-docker-all.tar | docker import - jenkins-docker-all:0.01
+导入镜像文件： docker load -i datacore.tar
+推送镜像文件到harbor仓库： docker push itoa/itao-datacore:V100R001B01D004SP01
+删除本地残留的镜像，防止对之后的替换造成影响: docker rmi  itoa/itao-datacore:V100R001B01D004SP01
+直接重启pod即可kubectl delete pod -n itoa itoa-ai-4gl47
+
+上传新镜像就使用yaml文件启动服务
+
+grep -Ev "^$|^\s*#"  *.yml
+kill -9
+ps aux
+ps aus
+
+
+kubectl delete pod --all --grace-period=0 --force -n org2
+
+kubectl -n kube-system describe secret $(kubectl -n kube-system get secret | grep admin-user | awk '{print $1}')
+
+
+
+code . --user-data-dir="~/.vscode-root"  --proxy-server=10.114.92.35:808
+code . --user-data-dir="~/.vscode-root"  --proxy-server=172.26.1.100:8080
+code --install-extension --user-data-dir="~/.vscode-root"
+
+fdisk -l
+
+
+
+
+This may happen if
+
+'Synaptic Package Manager' or 'Software Updater' is open.
+
+Some apt command is running in Terminal.
+
+Some apt process is running in background.
+
+For above wait for the process to complete. If this does not happen run in terminal:
+
+sudo killall apt apt-get
+If none of the above works, remove the lock files. Run in terminal:
+
+sudo rm /var/lib/apt/lists/lock
+sudo rm /var/cache/apt/archives/lock
+sudo rm /var/lib/dpkg/lock*
+then reconfigure the packages. Run in terminal:
+
+sudo dpkg --configure -a
+and
+
+sudo apt update
+That should do the job.
+
+
+
+
+
+sudo chmod 600 ××× （只有所有者有读和写的权限）
+sudo chmod 644 ××× （所有者有读和写的权限，组用户只有读的权限）
+sudo chmod 700 ××× （只有所有者有读和写以及执行的权限）
+sudo chmod 666 ××× （每个人都有读和写的权限）
+sudo chmod 777 ××× （每个人都有读和写以及执行的权限）
+
+
+cat /proc/version
+zip -r myfile.zip ./*
+scp local_file remote_username@remote_ip:remote_folder 
+scp local_file remote_username@remote_ip:remote_file 
+
+
+
+
+export http_proxy=118.210.42.251:44367
+export https_proxy=118.210.42.251:44367
+
+要取消该设置：
+unset http_proxy
+unset https_proxy
+
+
+
+在/etc/yum.conf后面添加以下内容：
+
+1. 如果代理不需要用户名密码认证：
+
+proxy=http://10.114.92.35:808
+
+
+
+如果需要认证
+
+
+proxy=http://代理服务器IP地址:端口号
+
+proxy_username=代理服务器用户名
+
+proxy_password=代理服务器密码
+
+sudo yum install python3
+
+
+
+
+vim /root/.pip/pip.conf
+[global]
+index-url=http://10.153.3.130/pypi/web/simple
+trusted-host=10.153.3.130
+
+
+
+useradd testuser 创建用户testuser
+passwd testuser 给已创建的用户testuser设置密码
+说明：新创建的用户会在/home下创建一个用户目录testuser
+usermod --help 修改用户这个命令的相关参数
+userdel testuser 删除用户testuser   rm -rf testuser 删除用户testuser所在目录
+创建新用户后，同时会在etc目录下的passwd文件中添加这个新用户的相关信息
+
+命令行窗口下用户的相互切换：
+su 用户名
+说明：su是switch user的缩写，表示用户切换
+useradd mn
+查看用户
+
+cat /etc/passwd
+1
+查看用户组
+
+cat /etc/group
+1
+查看当前活跃的用户列表
+
+w
+
+
+
+
+
+
+
+
+
+
+
+
+
+172.28.30.33
+
+
+10.114.134.246
+
+密码：
+
+Admin@123stor
+matrix123
+h3c123
+密码：12344321
+
+sudo passwd root
+sudo nautilus
+service sshd restart
+
