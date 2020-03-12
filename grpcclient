@@ -1,0 +1,47 @@
+# -*- coding: utf-8 -*-
+import grpc
+import time
+import serviceManager_pb2, serviceManager_pb2_grpc
+# from proto import serviceManager_pb2, serviceManager_pb2_grpc1
+
+
+# _HOST = 'svc-manager.itoa'
+_HOST = '177.177.175.90'
+_PORT = '55666'
+
+def run():
+    # conn = grpc.insecure_channel(_HOST + ':' + _PORT)  # 监听频道
+    # print(conn)
+    # client = serviceManager_pb2_grpc.ServiceManagerStub(channel=conn)
+    # print(client)
+    with grpc.insecure_channel("{0}:{1}".format(_HOST, _PORT)) as conn:
+        client = serviceManager_pb2_grpc.ServiceManagerStub(channel=conn)
+        print(conn)
+        print(client)
+        try:
+            response1 = client.UpdateService(serviceManager_pb2.ServiceRequest(ServiceName='itoa/itoa-knowledge-graph-unit:1.0.0.1583813706426 '))
+            print("received1: " + str(response1))
+            pass
+       
+        except Exception as e:
+            print(e)
+            pass
+
+        time.sleep(60)
+
+
+        try:
+            response2 = client.DeleteService(serviceManager_pb2.ServiceRequest(ServiceName='itoa/itoa-knowledge-graph-unit:1.0.0.1583813706426'))
+            print("received2: " + str(response2))
+            pass
+       
+        except Exception as e:
+            print(e)
+            pass        
+
+
+if __name__ == '__main__':
+    run()
+
+    
+    
